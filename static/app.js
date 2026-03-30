@@ -11,6 +11,7 @@ function App() {
     const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
     const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
     const [classId, setClassId] = useState(0);
+    const [samAssist, setSamAssist] = useState(true);
 
     const imgRef = useRef(null);
 
@@ -83,7 +84,8 @@ function App() {
     };
 
     const handleCanvasMouseDown = (e, label = 1) => {
-        if (!modelLoaded || !selectedImage || segmenting) return;
+        if (!selectedImage || segmenting) return;
+        if (samAssist && !modelLoaded) return;
         e.preventDefault();
 
         const rect = e.target.getBoundingClientRect();
@@ -100,44 +102,53 @@ function App() {
                 const dist = Math.sqrt(Math.pow(x_display - vx_display, 2) + Math.pow(y_display - vy_display, 2));
                 if (dist < vThreshold) {
                     if (e.button === 2) {
-                        // Right click: Remove vertex
                         const newPolygons = [...polygons];
                         newPolygons[i] = newPolygons[i].filter((_, idx) => idx !== j);
                         setPolygons(newPolygons);
                         return;
                     }
-                    // Left click: Start dragging vertex
                     setDraggingVertex({ polyIndex: i, vertexIndex: j });
                     return;
                 }
             }
         }
 
-        // Check if we are clicking near a SAM point (second priority)
-        const threshold = 18;
-        const pointIndex = points.findIndex(p => {
-            const px_display = (p.x / imgSize.w) * displaySize.w;
-            const py_display = (p.y / imgSize.h) * displaySize.h;
-            const dist = Math.sqrt(Math.pow(x_display - px_display, 2) + Math.pow(y_display - py_display, 2));
-            return dist < threshold;
-        });
+        const x = (x_display / displaySize.w) * imgSize.w;
+        const y = (y_display / displaySize.h) * imgSize.h;
 
-        if (pointIndex !== -1) {
-            if (e.button === 2) {
-                const newPoints = points.filter((_, i) => i !== pointIndex);
+        if (samAssist) {
+            const threshold = 18;
+            const pointIndex = points.findIndex(p => {
+                const px_display = (p.x / imgSize.w) * displaySize.w;
+                const py_display = (p.y / imgSize.h) * displaySize.h;
+                const dist = Math.sqrt(Math.pow(x_display - px_display, 2) + Math.pow(y_display - py_display, 2));
+                return dist < threshold;
+            });
+
+            if (pointIndex !== -1) {
+                if (e.button === 2) {
+                    const newPoints = points.filter((_, i) => i !== pointIndex);
+                    setPoints(newPoints);
+                    updateSegmentation(newPoints);
+                } else {
+                    setDraggingPointIndex(pointIndex);
+                }
+            } else {
+                const actualLabel = e.button === 2 ? 0 : 1;
+                const newPoint = { x, y, label: actualLabel };
+                const newPoints = [...points, newPoint];
                 setPoints(newPoints);
                 updateSegmentation(newPoints);
-            } else {
-                setDraggingPointIndex(pointIndex);
             }
         } else {
-            const x = (x_display / displaySize.w) * imgSize.w;
-            const y = (y_display / displaySize.h) * imgSize.h;
-            const actualLabel = e.button === 2 ? 0 : 1;
-            const newPoint = { x, y, label: actualLabel };
-            const newPoints = [...points, newPoint];
-            setPoints(newPoints);
-            updateSegmentation(newPoints);
+            // Manual Polygon creation
+            if (polygons.length === 0) {
+                setPolygons([[ [x, y] ]]);
+            } else {
+                const newPolygons = [...polygons];
+                newPolygons[0] = [...newPolygons[0], [x, y]];
+                setPolygons(newPolygons);
+            }
         }
     };
 
@@ -155,6 +166,8 @@ function App() {
             const newPoints = [...points];
             newPoints[draggingPointIndex] = { ...newPoints[draggingPointIndex], x, y };
             setPoints(newPoints);
+            // Real-time re-segmentation on drag
+            if (samAssist) updateSegmentation(newPoints);
         } else if (draggingVertex !== null) {
             const { polyIndex, vertexIndex } = draggingVertex;
             const newPolygons = [...polygons];
@@ -165,10 +178,7 @@ function App() {
     };
 
     const handleCanvasMouseUp = () => {
-        if (draggingPointIndex !== null) {
-            updateSegmentation(points);
-            setDraggingPointIndex(null);
-        }
+        setDraggingPointIndex(null);
         setDraggingVertex(null);
     };
 
@@ -256,8 +266,17 @@ function App() {
             <div className="main-content">
                 <div className="toolbar">
                     <div className="controls">
+                        <button 
+                            onClick={() => setSamAssist(!samAssist)}
+                            style={{background: samAssist ? '#2563eb' : '#64748b'}}
+                        >
+                            {samAssist ? 'SAM Assist: ON' : 'SAM Assist: OFF'}
+                        </button>
                         <span style={{color: '#64748b', fontSize: '0.875rem'}}>
-                            <b>Left click</b>: Positive point | <b>Right click</b>: Negative point
+                            {samAssist ? 
+                                <span><b>Left click</b>: Add/Move Positive | <b>Right click</b>: Add Negative / Remove Point</span> :
+                                <span><b>Click</b>: Add Vertex to manual polygon</span>
+                            }
                         </span>
                     </div>
                     <div style={{marginLeft: 'auto', display: 'flex', gap: '1rem', alignItems: 'center'}}>
