@@ -6,3 +6,4 @@ torch
 torchvision
 opencv-python
 psutil
+PyYAML

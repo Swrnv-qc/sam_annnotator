@@ -11,6 +11,7 @@ import gc
 from ultralytics import SAM
 import cv2
 import numpy as np
+import yaml
 
 app = FastAPI()
 
@@ -90,9 +91,7 @@ async def get_hardware():
 async def load_model(model_name: str):
     global sam_model, current_model_path
     
-    model_path = os.path.join("models", model_name)
-    
-    if sam_model is not None and current_model_path == model_path:
+    if sam_model is not None and current_model_path == model_name:
         return {"status": "already_loaded", "model": model_name}
     
     # Clear memory
@@ -104,9 +103,9 @@ async def load_model(model_name: str):
     
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        # Ultralytics SAM handles auto-download
+        # Download to models dir
         sam_model = SAM(model_name)
-        current_model_path = model_path
+        current_model_path = model_name
         return {"status": "success", "model": model_name, "device": device}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -117,13 +116,16 @@ async def segment(req: SegmentRequest):
     if sam_model is None:
         raise HTTPException(status_code=400, detail="Model not loaded")
     
+    if not req.points and not req.box:
+        return {"polygons": [], "box": None}
+
     img_path = os.path.join("images", req.image_name)
     if not os.path.exists(img_path):
         raise HTTPException(status_code=404, detail="Image not found")
     
     # Process points
-    points = [[p.x, p.y] for p in req.points]
-    labels = [p.label for p in req.points]
+    points = [[p.x, p.y] for p in req.points] if req.points else None
+    labels = [p.label for p in req.points] if req.points else None
     
     try:
         # Inference
@@ -132,13 +134,14 @@ async def segment(req: SegmentRequest):
             points=points, 
             labels=labels, 
             bboxes=req.box,
-            device=sam_model.device
+            device=sam_model.device,
+            conf=0.25,
+            verbose=False
         )
         
         # Extract masks
         result = results[0]
         if result.masks is not None:
-            # Get the first mask's polygons
             polygons = []
             for poly in result.masks.xy:
                 polygons.append(poly.tolist())
@@ -151,26 +154,37 @@ async def segment(req: SegmentRequest):
             return {"polygons": [], "box": None}
             
     except Exception as e:
+        print(f"Inference error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Cleanup cache if on GPU
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
 @app.post("/api/save-label")
-async def save_label(image_name: str, class_id: int, polygons: List[List[List[float]]]):
+async def save_label(image_name: str, class_id: int, polygons: List[List[float]]):
     label_path = os.path.join("labels", os.path.splitext(image_name)[0] + ".txt")
     
     img = cv2.imread(os.path.join("images", image_name))
+    if img is None:
+        raise HTTPException(status_code=404, detail="Image read error")
     h, w = img.shape[:2]
     
     with open(label_path, "a") as f:
-        for poly_group in polygons:
-            for poly in poly_group:
-                # Normalize coordinates for YOLO
-                normalized = []
-                for pt in poly:
-                    normalized.append(f"{pt[0]/w} {pt[1]/h}")
-                f.write(f"{class_id} {' '.join(normalized)}\n")
+        normalized = []
+        for pt in polygons:
+            normalized.append(f"{pt[0]/w} {pt[1]/h}")
+        f.write(f"{class_id} {' '.join(normalized)}\n")
                 
     return {"status": "success", "path": label_path}
+
+@app.post("/api/generate-yaml")
+async def generate_yaml(classes: List[str]):
+    data = {
+        "path": os.getcwd(),
+        "train": "images",
+        "val": "images",
+        "names": {i: name for i, name in enumerate(classes)}
+    }
+    with open("dataset.yaml", "w") as f:
+        yaml.dump(data, f)
+    return {"status": "success", "path": "dataset.yaml"}

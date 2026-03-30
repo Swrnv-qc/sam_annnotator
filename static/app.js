@@ -1,102 +1,242 @@
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef, useMemo } = React;
 
-function ImageViewer() {
+function App() {
     const [images, setImages] = useState([]);
-    const [currentIndex, setCurrentIndex] = useState(0);
-    const [loading, setLoading] = useState(true);
+    const [selectedImage, setSelectedImage] = useState(null);
+    const [hardware, setHardware] = useState(null);
+    const [modelLoading, setModelLoading] = useState(false);
+    const [modelLoaded, setModelLoaded] = useState(false);
+    const [points, setPoints] = useState([]);
+    const [polygons, setPolygons] = useState([]);
+    const [imgSize, setImgSize] = useState({ w: 0, h: 0 });
+    const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
+    const [pointType, setPointType] = useState(1); // 1: Positive, 0: Negative
+    const [classId, setClassId] = useState(0);
+
+    const imgRef = useRef(null);
 
     useEffect(() => {
-        const fetchImages = () => {
-            // Add a timestamp parameter for cache busting
-            fetch(`/api/images?t=${new Date().getTime()}`)
-                .then(res => res.json())
-                .then(data => {
-                    setImages(prevImages => {
-                        // Compare the actual content to avoid unnecessary state updates
-                        const hasChanged = prevImages.length !== data.length || 
-                                          prevImages.some((img, idx) => img !== data[idx]);
-                        
-                        if (hasChanged) {
-                            return data;
-                        }
-                        return prevImages;
-                    });
-                    setLoading(false);
-                })
-                .catch(err => {
-                    console.error("Error fetching images:", err);
-                    setLoading(false);
-                });
-        };
-
-        fetchImages();
-        const interval = setInterval(fetchImages, 2000); // Poll every 2 seconds
-
-        return () => clearInterval(interval);
+        fetch('/api/images').then(r => r.json()).then(setImages);
+        fetch('/api/hardware').then(r => r.json()).then(setHardware);
     }, []);
 
-    const nextImage = () => {
-        if (currentIndex < images.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-        }
+    const loadModel = () => {
+        if (!hardware) return;
+        setModelLoading(true);
+        fetch(`/api/load-model?model_name=${hardware.recommended_model}`, { method: 'POST' })
+            .then(r => r.json())
+            .then(() => {
+                setModelLoaded(true);
+                setModelLoading(false);
+            });
     };
 
-    const prevImage = () => {
-        if (currentIndex > 0) {
-            setCurrentIndex(currentIndex - 1);
-        }
+    const handleImageSelect = (name) => {
+        setSelectedImage(name);
+        setPoints([]);
+        setPolygons([]);
     };
 
-    if (loading) {
-        return <div className="container"><h1>Loading...</h1></div>;
-    }
+    const handleImgLoad = (e) => {
+        const { naturalWidth, naturalHeight, width, height } = e.target;
+        setImgSize({ w: naturalWidth, h: naturalHeight });
+        setDisplaySize({ w: width, h: height });
+    };
 
-    if (images.length === 0) {
-        return (
-            <div className="container">
-                <h1>React Image Viewer</h1>
-                <div className="viewer-container">
-                    <div className="empty-state">
-                        No images found in /images folder.<br/>
-                        Add some JPG/PNG files to see them here!
-                    </div>
-                </div>
-            </div>
+    const [segmenting, setSegmenting] = useState(false);
+
+    const handleCanvasClick = (e) => {
+        if (!modelLoaded || !selectedImage || segmenting) return;
+
+        const rect = e.target.getBoundingClientRect();
+        const x_display = e.clientX - rect.left;
+        const y_display = e.clientY - rect.top;
+
+        const x = (x_display / displaySize.w) * imgSize.w;
+        const y = (y_display / displaySize.h) * imgSize.h;
+
+        const newPoint = { x, y, label: pointType };
+        const newPoints = [...points, newPoint];
+        setPoints(newPoints);
+
+        setSegmenting(true);
+        fetch('/api/segment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_name: selectedImage,
+                points: newPoints
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.polygons) setPolygons(data.polygons);
+            setSegmenting(false);
+        })
+        .catch(() => setSegmenting(false));
+    };
+
+    const saveAnnotation = () => {
+        if (!selectedImage || polygons.length === 0) return;
+        
+        // Save each generated polygon for this object
+        const promises = polygons.map(poly => 
+            fetch(`/api/save-label?image_name=${selectedImage}&class_id=${classId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(poly)
+            })
         );
-    }
+
+        Promise.all(promises).then(() => {
+            alert('Saved current object!');
+            setPoints([]);
+            setPolygons([]);
+        });
+    };
+
+    const undoPoint = () => {
+        const newPoints = points.slice(0, -1);
+        setPoints(newPoints);
+        if (newPoints.length === 0) {
+            setPolygons([]);
+            return;
+        }
+        
+        setSegmenting(true);
+        fetch('/api/segment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image_name: selectedImage,
+                points: newPoints
+            })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.polygons) setPolygons(data.polygons);
+            setSegmenting(false);
+        })
+        .catch(() => setSegmenting(false));
+    };
+
+    const clearPoints = () => {
+        setPoints([]);
+        setPolygons([]);
+    };
 
     return (
-        <div className="container">
-            <h1>React Image Viewer</h1>
-            <div className="viewer-container">
-                <img 
-                    src={`/images/${images[currentIndex]}`} 
-                    alt={images[currentIndex]} 
-                />
+        <React.Fragment>
+            <div className="sidebar">
+                <div className="hardware-panel">
+                    {hardware ? (
+                        <div>
+                            <b>{hardware.gpu_name}</b> ({hardware.vram_gb}GB VRAM)<br/>
+                            Recommended: {hardware.recommended_model}<br/>
+                            <button 
+                                onClick={loadModel} 
+                                disabled={modelLoading || modelLoaded}
+                                style={{marginTop: '0.5rem', width: '100%'}}
+                            >
+                                {modelLoading ? 'Loading Model...' : modelLoaded ? 'Model Ready' : 'Load Model'}
+                            </button>
+                        </div>
+                    ) : 'Detecting hardware...'}
+                </div>
+                <div style={{padding: '1rem', borderBottom: '1px solid #eee'}}>
+                    <b>Images ({images.length})</b>
+                </div>
+                {images.map(img => (
+                    <div 
+                        key={img} 
+                        className={`img-item ${selectedImage === img ? 'active' : ''}`}
+                        onClick={() => handleImageSelect(img)}
+                    >
+                        {img}
+                    </div>
+                ))}
             </div>
-            
-            <div className="btn-group">
-                <button 
-                    onClick={prevImage} 
-                    disabled={currentIndex === 0}
-                >
-                    Previous
-                </button>
-                <span>{currentIndex + 1} / {images.length}</span>
-                <button 
-                    onClick={nextImage} 
-                    disabled={currentIndex === images.length - 1}
-                >
-                    Next
-                </button>
+
+            <div className="main-content">
+                <div className="toolbar">
+                    <div className="controls">
+                        <button 
+                            onClick={() => setPointType(1)}
+                            style={{background: pointType === 1 ? '#22c55e' : '#94a3b8'}}
+                        >
+                            + Positive Point
+                        </button>
+                        <button 
+                            onClick={() => setPointType(0)}
+                            style={{background: pointType === 0 ? '#ef4444' : '#94a3b8'}}
+                        >
+                            - Negative Point
+                        </button>
+                    </div>
+                    <div style={{marginLeft: 'auto', display: 'flex', gap: '1rem', alignItems: 'center'}}>
+                        {segmenting && <span style={{color: '#d97706', fontSize: '0.875rem', fontWeight: 'bold'}}>Segmenting...</span>}
+                        <span>Class: <input type="number" value={classId} onChange={e => setClassId(parseInt(e.target.value))} style={{width: '40px'}} /></span>
+                        <button onClick={undoPoint} disabled={points.length === 0} style={{background: '#64748b'}}>Undo</button>
+                        <button onClick={clearPoints} style={{background: '#64748b'}}>Clear</button>
+                        <button onClick={saveAnnotation} disabled={polygons.length === 0 || segmenting}>Save Annotation (YOLO)</button>
+                    </div>
+                </div>
+
+                <div className="image-container">
+                    {selectedImage ? (
+                        <div className="canvas-wrapper">
+                            <img 
+                                ref={imgRef}
+                                src={`/images/${selectedImage}`} 
+                                onLoad={handleImgLoad}
+                                style={{maxHeight: '80vh', maxWidth: '100%', display: 'block'}}
+                            />
+                            {imgSize.w > 0 && (
+                                <svg 
+                                    className="svg-overlay"
+                                    width={displaySize.w} 
+                                    height={displaySize.h}
+                                    style={{position: 'absolute', top: 0, left: 0}}
+                                >
+                                    {polygons.map((poly, i) => (
+                                        <polygon 
+                                            key={i}
+                                            points={poly.map(p => `${(p[0]/imgSize.w)*displaySize.w},${(p[1]/imgSize.h)*displaySize.h}`).join(' ')}
+                                            fill="rgba(37, 99, 235, 0.4)"
+                                            stroke="rgba(37, 99, 235, 1)"
+                                            strokeWidth="2"
+                                        />
+                                    ))}
+                                    {points.map((p, i) => (
+                                        <circle 
+                                            key={i}
+                                            cx={(p.x/imgSize.w)*displaySize.w}
+                                            cy={(p.y/imgSize.h)*displaySize.h}
+                                            r="5"
+                                            fill={p.label === 1 ? '#22c55e' : '#ef4444'}
+                                            stroke="white"
+                                            strokeWidth="2"
+                                        />
+                                    ))}
+                                </svg>
+                            )}
+                            <div 
+                                className="interaction-layer"
+                                style={{width: displaySize.w, height: displaySize.h, position: 'absolute', top: 0, left: 0}}
+                                onClick={handleCanvasClick}
+                            ></div>
+                        </div>
+                    ) : (
+                        <div style={{color: '#64748b', textAlign: 'center'}}>
+                            <h2>Select an image to start annotating</h2>
+                            <p>Use SAM 2 to automatically generate polygons by clicking.</p>
+                        </div>
+                    )}
+                </div>
             </div>
-            
-            <div className="file-info">
-                Viewing: <strong>{images[currentIndex]}</strong>
-            </div>
-        </div>
+        </React.Fragment>
     );
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<ImageViewer />);
+root.render(<App />);
