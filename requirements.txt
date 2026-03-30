@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+jinja2
+ultralytics
+torch
+torchvision
+opencv-python
+psutil

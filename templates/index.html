@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FastAPI React Image Viewer</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f3f4f6;
+        }
+        .container {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            text-align: center;
+            width: 80%;
+            max-width: 800px;
+        }
+        h1 { color: #1f2937; margin-bottom: 1rem; font-size: 1.5rem; }
+        .viewer-container {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            background-color: #1f2937;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+        .viewer-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .btn-group {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            align-items: center;
+        }
+        button {
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background-color: #1d4ed8;
+            transform: translateY(-1px);
+        }
+        button:disabled {
+            background-color: #d1d5db;
+            cursor: not-allowed;
+        }
+        .file-info {
+            margin-top: 1rem;
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+        .empty-state {
+            color: white;
+            padding: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel" src="/static/app.js"></script>
+</body>
+</html>
