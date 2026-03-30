@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, File, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -36,6 +36,10 @@ class Point(BaseModel):
     y: float
     label: int  # 1 for positive, 0 for negative
 
+class Label(BaseModel):
+    class_id: int
+    polygon: List[List[float]]
+
 class SegmentRequest(BaseModel):
     image_name: str
     points: List[Point]
@@ -55,6 +59,15 @@ async def list_images():
         if os.path.splitext(f)[1].lower() in image_extensions
     ]
     return sorted(images)
+
+@app.post("/api/upload")
+async def upload_images(files: List[UploadFile] = File(...)):
+    for file in files:
+        file_path = os.path.join("images", file.filename)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+    return {"status": "success", "count": len(files)}
 
 @app.get("/api/hardware")
 async def get_hardware():
@@ -164,7 +177,7 @@ async def segment(req: SegmentRequest):
             torch.cuda.empty_cache()
 
 @app.post("/api/save-label")
-async def save_label(image_name: str, class_id: int, polygons: List[List[float]]):
+async def save_label(image_name: str, labels: List[Label]):
     label_path = os.path.join("labels", os.path.splitext(image_name)[0] + ".txt")
     
     img = cv2.imread(os.path.join("images", image_name))
@@ -172,11 +185,12 @@ async def save_label(image_name: str, class_id: int, polygons: List[List[float]]
         raise HTTPException(status_code=404, detail="Image read error")
     h, w = img.shape[:2]
     
-    with open(label_path, "a") as f:
-        normalized = []
-        for pt in polygons:
-            normalized.append(f"{pt[0]/w} {pt[1]/h}")
-        f.write(f"{class_id} {' '.join(normalized)}\n")
+    with open(label_path, "w") as f:
+        for label in labels:
+            normalized = []
+            for pt in label.polygon:
+                normalized.append(f"{pt[0]/w} {pt[1]/h}")
+            f.write(f"{label.class_id} {' '.join(normalized)}\n")
                 
     return {"status": "success", "path": label_path}
 
@@ -191,3 +205,37 @@ async def generate_yaml(classes: List[str]):
     with open("dataset.yaml", "w") as f:
         yaml.dump(data, f)
     return {"status": "success", "path": "dataset.yaml"}
+
+@app.get("/api/classes")
+async def get_classes():
+    if os.path.exists("dataset.yaml"):
+        with open("dataset.yaml", "r") as f:
+            data = yaml.safe_load(f)
+            return data.get("names", {0: "default"})
+    return {0: "default"}
+
+@app.get("/api/labels/{image_name}")
+async def get_labels(image_name: str):
+    label_path = os.path.join("labels", os.path.splitext(image_name)[0] + ".txt")
+    if not os.path.exists(label_path):
+        return {"polygons": []}
+    
+    img = cv2.imread(os.path.join("images", image_name))
+    if img is None:
+        raise HTTPException(status_code=404, detail="Image read error")
+    h, w = img.shape[:2]
+    
+    results = []
+    with open(label_path, "r") as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) < 3: continue
+            class_id = int(parts[0])
+            coords = [float(x) for x in parts[1:]]
+            # Convert back from normalized to pixel coordinates
+            poly = []
+            for i in range(0, len(coords), 2):
+                poly.append([coords[i] * w, coords[i+1] * h])
+            results.append({"class_id": class_id, "polygon": poly})
+            
+    return {"polygons": results}

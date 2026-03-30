@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SAM 2 Auto-Annotator</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,15 +12,44 @@
         :root {
             --primary: #2563eb;
             --bg: #f8fafc;
+            --sidebar-bg: #ffffff;
+            --text-main: #1e293b;
+            --text-muted: #64748b;
+            --border-color: #e2e8f0;
+            --toolbar-bg: #ffffff;
+            --item-hover: #f8fafc;
+            --item-active-bg: #eff6ff;
+            --item-active-text: #2563eb;
+            --hardware-panel-bg: #f1f5f9;
+            --help-bg: #f8fafc;
+            --help-kbd-bg: #e2e8f0;
             --sidebar-width: 260px;
         }
+
+        .dark-theme {
+            --bg: #0f172a;
+            --sidebar-bg: #1e293b;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+            --toolbar-bg: #1e293b;
+            --item-hover: #334155;
+            --item-active-bg: #2563eb;
+            --item-active-text: #ffffff;
+            --hardware-panel-bg: #0f172a;
+            --help-bg: #1e293b;
+            --help-kbd-bg: #334155;
+        }
+
         body, html {
             margin: 0;
             padding: 0;
             height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg);
+            color: var(--text-main);
             overflow: hidden;
+            transition: background-color 0.3s, color 0.3s;
         }
         #root {
             display: flex;
@@ -28,11 +58,12 @@
         }
         .sidebar {
             width: var(--sidebar-width);
-            background: white;
-            border-right: 1px solid #e2e8f0;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            transition: background-color 0.3s, border-color 0.3s;
         }
         .main-content {
             flex: 1;
@@ -43,13 +74,14 @@
         }
         .toolbar {
             height: 60px;
-            background: white;
-            border-bottom: 1px solid #e2e8f0;
+            background: var(--toolbar-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             padding: 0 1rem;
             gap: 1rem;
             z-index: 10;
+            transition: background-color 0.3s, border-color 0.3s;
         }
         .image-container {
             flex: 1;
@@ -78,30 +110,36 @@
         }
         .img-item {
             padding: 0.75rem 1rem;
-            border-bottom: 1px solid #f1f5f9;
+            border-bottom: 1px solid var(--border-color);
             cursor: pointer;
             font-size: 0.875rem;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            color: var(--text-main);
         }
-        .img-item:hover { background: #f8fafc; }
-        .img-item.active { background: #eff6ff; border-left: 4px solid var(--primary); color: var(--primary); }
+        .img-item:hover { background: var(--item-hover); }
+        .img-item.active { 
+            background: var(--item-active-bg); 
+            border-left: 4px solid var(--primary); 
+            color: var(--item-active-text); 
+        }
         
         .hardware-panel {
             padding: 1rem;
-            background: #f1f5f9;
+            background: var(--hardware-panel-bg);
             font-size: 0.75rem;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.3s, border-color 0.3s;
         }
         .help-section {
             margin-top: auto;
-            border-top: 1px solid #e2e8f0;
+            border-top: 1px solid var(--border-color);
             padding: 1rem;
         }
         .help-content {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
+            background: var(--help-bg);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             padding: 0.75rem;
             font-size: 0.75rem;
@@ -110,6 +148,7 @@
             margin-top: 0.5rem;
             max-height: 300px;
             overflow-y: auto;
+            color: var(--text-main);
         }
         .help-content.visible { display: block; }
         .help-toggle {
@@ -119,14 +158,15 @@
             cursor: pointer;
             font-weight: bold;
             font-size: 0.875rem;
-            color: #64748b;
+            color: var(--text-muted);
         }
         .help-kdb {
-            background: #e2e8f0;
+            background: var(--help-kbd-bg);
             padding: 1px 4px;
             border-radius: 3px;
             font-family: monospace;
             font-weight: bold;
+            color: var(--text-main);
         }
         button {
             padding: 0.5rem 1rem;
@@ -144,6 +184,20 @@
         }
         .point-pos { color: #22c55e; }
         .point-neg { color: #ef4444; }
+
+        .theme-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            cursor: pointer;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .theme-toggle:hover {
+            color: var(--text-main);
+        }
     </style>
 </head>
 <body>
