@@ -59,6 +59,7 @@ function App() {
     const [segmenting, setSegmenting] = useState(false);
     const [draggingPointIndex, setDraggingPointIndex] = useState(null);
     const [draggingVertex, setDraggingVertex] = useState(null); // {polyIndex, vertexIndex}
+    const hasMoved = useRef(false);
 
     const updateSegmentation = (newPoints) => {
         if (newPoints.length === 0) {
@@ -87,6 +88,7 @@ function App() {
         if (!selectedImage || segmenting) return;
         if (samAssist && !modelLoaded) return;
         e.preventDefault();
+        hasMoved.current = false;
 
         const rect = e.target.getBoundingClientRect();
         const x_display = e.clientX - rect.left;
@@ -154,6 +156,7 @@ function App() {
 
     const handleCanvasMouseMove = (e) => {
         if (draggingPointIndex === null && draggingVertex === null) return;
+        hasMoved.current = true;
 
         const rect = e.target.getBoundingClientRect();
         const x_display = Math.max(0, Math.min(displaySize.w, e.clientX - rect.left));
@@ -178,6 +181,18 @@ function App() {
     };
 
     const handleCanvasMouseUp = () => {
+        if (!hasMoved.current) {
+            if (draggingPointIndex !== null) {
+                const newPoints = points.filter((_, i) => i !== draggingPointIndex);
+                setPoints(newPoints);
+                updateSegmentation(newPoints);
+            } else if (draggingVertex !== null) {
+                const { polyIndex, vertexIndex } = draggingVertex;
+                const newPolygons = [...polygons];
+                newPolygons[polyIndex] = newPolygons[polyIndex].filter((_, idx) => idx !== vertexIndex);
+                setPolygons(newPolygons);
+            }
+        }
         setDraggingPointIndex(null);
         setDraggingVertex(null);
     };
