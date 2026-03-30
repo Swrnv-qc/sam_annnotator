@@ -59,10 +59,57 @@ function App() {
     const [segmenting, setSegmenting] = useState(false);
     const [draggingPointIndex, setDraggingPointIndex] = useState(null);
     const [draggingVertex, setDraggingVertex] = useState(null); // {polyIndex, vertexIndex}
+    const [selectionBox, setSelectionBox] = useState(null); // {x1, y1, x2, y2}
+    const [selectedItems, setSelectedItems] = useState({ points: [], vertices: [] });
+    const [helpVisible, setHelpVisible] = useState(false);
     const hasMoved = useRef(false);
 
-    const updateSegmentation = (newPoints) => {
-        if (newPoints.length === 0) {
+    const deleteSelected = () => {
+        let newPoints = [...points];
+        // Sort indices descending to avoid shift issues if we used indices, 
+        // but here we filter by actual object equality or stable properties.
+        if (selectedItems.points.length > 0) {
+            const pointsToKeep = points.filter((_, idx) => !selectedItems.points.includes(idx));
+            newPoints = pointsToKeep;
+            setPoints(newPoints);
+        }
+
+        let newPolygons = [...polygons];
+        if (selectedItems.vertices.length > 0) {
+            newPolygons = polygons.map((poly, pIdx) => {
+                return poly.filter((_, vIdx) => {
+                    return !selectedItems.vertices.some(sv => sv.polyIndex === pIdx && sv.vertexIndex === vIdx);
+                });
+            });
+            setPolygons(newPolygons);
+        }
+
+        setSelectedItems({ points: [], vertices: [] });
+    };
+
+    const runSAM = () => {
+        if (samAssist && modelLoaded && points.length > 0) {
+            updateSegmentation(points);
+        }
+    };
+
+    // Keyboard listener for deletion and SAM
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Delete' || e.key === 'Backspace') {
+                if (selectedItems.points.length > 0 || selectedItems.vertices.length > 0) {
+                    deleteSelected();
+                }
+            } else if (e.key === 'Enter') {
+                runSAM();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selectedItems, points, polygons, samAssist, modelLoaded]);
+
+    const updateSegmentation = (newPoints, customBox = null) => {
+        if (newPoints.length === 0 && !customBox) {
             setPolygons([]);
             return;
         }
@@ -73,7 +120,8 @@ function App() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 image_name: selectedImage,
-                points: newPoints
+                points: newPoints,
+                box: customBox
             })
         })
         .then(r => r.json())
@@ -93,6 +141,16 @@ function App() {
         const rect = e.target.getBoundingClientRect();
         const x_display = e.clientX - rect.left;
         const y_display = e.clientY - rect.top;
+
+        // Shift key: Start marquee selection
+        if (e.shiftKey) {
+            setSelectionBox({ x1: x_display, y1: y_display, x2: x_display, y2: y_display });
+            setSelectedItems({ points: [], vertices: [] });
+            return;
+        }
+
+        // Clear selection if clicking elsewhere without shift
+        setSelectedItems({ points: [], vertices: [] });
 
         // Check if we are clicking near a polygon vertex (highest priority)
         const vThreshold = 15;
@@ -131,7 +189,6 @@ function App() {
                 if (e.button === 2) {
                     const newPoints = points.filter((_, i) => i !== pointIndex);
                     setPoints(newPoints);
-                    updateSegmentation(newPoints);
                 } else {
                     setDraggingPointIndex(pointIndex);
                 }
@@ -140,7 +197,6 @@ function App() {
                 const newPoint = { x, y, label: actualLabel };
                 const newPoints = [...points, newPoint];
                 setPoints(newPoints);
-                updateSegmentation(newPoints);
             }
         } else {
             // Manual Polygon creation
@@ -155,12 +211,43 @@ function App() {
     };
 
     const handleCanvasMouseMove = (e) => {
-        if (draggingPointIndex === null && draggingVertex === null) return;
-        hasMoved.current = true;
-
         const rect = e.target.getBoundingClientRect();
         const x_display = Math.max(0, Math.min(displaySize.w, e.clientX - rect.left));
         const y_display = Math.max(0, Math.min(displaySize.h, e.clientY - rect.top));
+
+        if (selectionBox) {
+            const newBox = { ...selectionBox, x2: x_display, y2: y_display };
+            setSelectionBox(newBox);
+            
+            // Find items inside box
+            const minX = Math.min(newBox.x1, newBox.x2);
+            const maxX = Math.max(newBox.x1, newBox.x2);
+            const minY = Math.min(newBox.y1, newBox.y2);
+            const maxY = Math.max(newBox.y1, newBox.y2);
+
+            const selPoints = [];
+            points.forEach((p, idx) => {
+                const px = (p.x / imgSize.w) * displaySize.w;
+                const py = (p.y / imgSize.h) * displaySize.h;
+                if (px >= minX && px <= maxX && py >= minY && py <= maxY) selPoints.push(idx);
+            });
+
+            const selVertices = [];
+            polygons.forEach((poly, pIdx) => {
+                poly.forEach((pt, vIdx) => {
+                    const vx = (pt[0] / imgSize.w) * displaySize.w;
+                    const vy = (pt[1] / imgSize.h) * displaySize.h;
+                    if (vx >= minX && vx <= maxX && vy >= minY && vy <= maxY) {
+                        selVertices.push({ polyIndex: pIdx, vertexIndex: vIdx });
+                    }
+                });
+            });
+            setSelectedItems({ points: selPoints, vertices: selVertices });
+            return;
+        }
+
+        if (draggingPointIndex === null && draggingVertex === null) return;
+        hasMoved.current = true;
 
         const x = (x_display / displaySize.w) * imgSize.w;
         const y = (y_display / displaySize.h) * imgSize.h;
@@ -169,8 +256,6 @@ function App() {
             const newPoints = [...points];
             newPoints[draggingPointIndex] = { ...newPoints[draggingPointIndex], x, y };
             setPoints(newPoints);
-            // Real-time re-segmentation on drag
-            if (samAssist) updateSegmentation(newPoints);
         } else if (draggingVertex !== null) {
             const { polyIndex, vertexIndex } = draggingVertex;
             const newPolygons = [...polygons];
@@ -181,17 +266,22 @@ function App() {
     };
 
     const handleCanvasMouseUp = () => {
+        if (selectionBox) {
+            setSelectionBox(null);
+            return;
+        }
         if (!hasMoved.current) {
             if (draggingPointIndex !== null) {
                 const newPoints = points.filter((_, i) => i !== draggingPointIndex);
                 setPoints(newPoints);
-                updateSegmentation(newPoints);
             } else if (draggingVertex !== null) {
                 const { polyIndex, vertexIndex } = draggingVertex;
                 const newPolygons = [...polygons];
                 newPolygons[polyIndex] = newPolygons[polyIndex].filter((_, idx) => idx !== vertexIndex);
                 setPolygons(newPolygons);
             }
+        } else {
+            // Do nothing on drag end - maintain user edits
         }
         setDraggingPointIndex(null);
         setDraggingVertex(null);
@@ -221,24 +311,7 @@ function App() {
         setPoints(newPoints);
         if (newPoints.length === 0) {
             setPolygons([]);
-            return;
         }
-        
-        setSegmenting(true);
-        fetch('/api/segment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                image_name: selectedImage,
-                points: newPoints
-            })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.polygons) setPolygons(data.polygons);
-            setSegmenting(false);
-        })
-        .catch(() => setSegmenting(false));
     };
 
     const clearPoints = () => {
@@ -276,6 +349,32 @@ function App() {
                         {img}
                     </div>
                 ))}
+
+                <div className="help-section">
+                    <div className="help-toggle" onClick={() => setHelpVisible(!helpVisible)}>
+                        <span>Interactive Help</span>
+                        <span className="material-icons" style={{fontSize: '18px'}}>
+                            {helpVisible ? 'expand_less' : 'expand_more'}
+                        </span>
+                    </div>
+                    <div className={`help-content ${helpVisible ? 'visible' : ''}`}>
+                        <p><b>Mouse Controls:</b></p>
+                        <ul style={{paddingLeft: '1.2rem', margin: '0.5rem 0'}}>
+                            <li><b>Left Click:</b> Add positive point (SAM) or manual vertex.</li>
+                            <li><b>Right Click:</b> Add negative point (SAM) or remove point.</li>
+                            <li><b>Drag:</b> Move SAM points or polygon vertices.</li>
+                            <li><b>Shift + Drag:</b> Select multiple items (Marquee).</li>
+                        </ul>
+                        <p><b>Keyboard Shortcuts:</b></p>
+                        <ul style={{paddingLeft: '1.2rem', margin: '0.5rem 0'}}>
+                            <li><span className="help-kdb">ENTER</span>: Run SAM segmentation.</li>
+                            <li><span className="help-kdb">DEL</span> / <span className="help-kdb">BS</span>: Delete selected items.</li>
+                        </ul>
+                        <p style={{fontSize: '0.7rem', color: '#64748b', marginTop: '0.5rem'}}>
+                            <i>SAM Assist Mode:</i> Manual points are used as prompts for SAM 2 to generate polygons.
+                        </p>
+                    </div>
+                </div>
             </div>
 
             <div className="main-content">
@@ -297,6 +396,7 @@ function App() {
                     <div style={{marginLeft: 'auto', display: 'flex', gap: '1rem', alignItems: 'center'}}>
                         {segmenting && <span style={{color: '#d97706', fontSize: '0.875rem', fontWeight: 'bold'}}>Segmenting...</span>}
                         <span>Class: <input type="number" value={classId} onChange={e => setClassId(parseInt(e.target.value))} style={{width: '40px'}} /></span>
+                        <button onClick={runSAM} disabled={!samAssist || !modelLoaded || points.length === 0} style={{background: '#059669'}}>Run SAM (Enter)</button>
                         <button onClick={undoPoint} disabled={points.length === 0} style={{background: '#64748b'}}>Undo</button>
                         <button onClick={clearPoints} style={{background: '#64748b'}}>Clear</button>
                         <button onClick={saveAnnotation} disabled={polygons.length === 0 || segmenting}>Save Annotation (YOLO)</button>
@@ -319,6 +419,17 @@ function App() {
                                     height={displaySize.h}
                                     style={{position: 'absolute', top: 0, left: 0}}
                                 >
+                                    {selectionBox && (
+                                        <rect 
+                                            x={Math.min(selectionBox.x1, selectionBox.x2)}
+                                            y={Math.min(selectionBox.y1, selectionBox.y2)}
+                                            width={Math.abs(selectionBox.x2 - selectionBox.x1)}
+                                            height={Math.abs(selectionBox.y2 - selectionBox.y1)}
+                                            fill="rgba(37, 99, 235, 0.1)"
+                                            stroke="#2563eb"
+                                            strokeDasharray="4"
+                                        />
+                                    )}
                                     {polygons.map((poly, i) => (
                                         <React.Fragment key={i}>
                                             <polygon 
@@ -327,32 +438,38 @@ function App() {
                                                 stroke="rgba(37, 99, 235, 1)"
                                                 strokeWidth="2"
                                             />
-                                            {poly.map((p, j) => (
-                                                <circle 
-                                                    key={`${i}-${j}`}
-                                                    cx={(p[0]/imgSize.w)*displaySize.w}
-                                                    cy={(p[1]/imgSize.h)*displaySize.h}
-                                                    r="4"
-                                                    fill="white"
-                                                    stroke="#2563eb"
-                                                    strokeWidth="1.5"
-                                                    style={{ cursor: 'move' }}
-                                                />
-                                            ))}
+                                            {poly.map((p, j) => {
+                                                const isSelected = selectedItems.vertices.some(sv => sv.polyIndex === i && sv.vertexIndex === j);
+                                                return (
+                                                    <circle 
+                                                        key={`${i}-${j}`}
+                                                        cx={(p[0]/imgSize.w)*displaySize.w}
+                                                        cy={(p[1]/imgSize.h)*displaySize.h}
+                                                        r={isSelected ? "6" : "4"}
+                                                        fill={isSelected ? "#fbbf24" : "white"}
+                                                        stroke={isSelected ? "#d97706" : "#2563eb"}
+                                                        strokeWidth="1.5"
+                                                        style={{ cursor: 'move' }}
+                                                    />
+                                                );
+                                            })}
                                         </React.Fragment>
                                     ))}
-                                    {points.map((p, i) => (
-                                        <circle 
-                                            key={i}
-                                            cx={(p.x/imgSize.w)*displaySize.w}
-                                            cy={(p.y/imgSize.h)*displaySize.h}
-                                            r="7"
-                                            fill={p.label === 1 ? '#22c55e' : '#ef4444'}
-                                            stroke="white"
-                                            strokeWidth="2"
-                                            style={{ cursor: 'move', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}
-                                        />
-                                    ))}
+                                    {points.map((p, i) => {
+                                        const isSelected = selectedItems.points.includes(i);
+                                        return (
+                                            <circle 
+                                                key={i}
+                                                cx={(p.x/imgSize.w)*displaySize.w}
+                                                cy={(p.y/imgSize.h)*displaySize.h}
+                                                r={isSelected ? "10" : "7"}
+                                                fill={isSelected ? "#fbbf24" : (p.label === 1 ? '#22c55e' : '#ef4444')}
+                                                stroke="white"
+                                                strokeWidth="2"
+                                                style={{ cursor: 'move', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.4))' }}
+                                            />
+                                        );
+                                    })}
                                 </svg>
                             )}
                             <div 

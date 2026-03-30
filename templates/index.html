@@ -94,6 +94,40 @@
             font-size: 0.75rem;
             border-bottom: 1px solid #e2e8f0;
         }
+        .help-section {
+            margin-top: auto;
+            border-top: 1px solid #e2e8f0;
+            padding: 1rem;
+        }
+        .help-content {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 0.75rem;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            display: none;
+            margin-top: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .help-content.visible { display: block; }
+        .help-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        .help-kdb {
+            background: #e2e8f0;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-weight: bold;
+        }
         button {
             padding: 0.5rem 1rem;
             background: var(--primary);

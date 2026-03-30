@@ -144,7 +144,7 @@ async def segment(req: SegmentRequest):
         if result.masks is not None:
             polygons = []
             for poly in result.masks.xy:
-                # Simplify polygon for manual editing (epsilon is 0.1% of perimeter)
+                # Simplify polygon for manual editing (epsilon is 0.2% of perimeter)
                 epsilon = 0.002 * cv2.arcLength(poly, True)
                 approx = cv2.approxPolyDP(poly, epsilon, True)
                 polygons.append(approx.reshape(-1, 2).tolist())
